@@ -4,3 +4,7 @@ target/
 **/.idea/
 *.iml
 .DS_Store
+
+.env
+*.env
+pg_data/

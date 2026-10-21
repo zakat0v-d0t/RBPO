@@ -1,0 +1,21 @@
+DO
+$do$
+BEGIN
+   IF NOT EXISTS (
+      SELECT FROM pg_catalog.pg_roles
+      WHERE rolname = 'library_app_user') THEN
+
+      CREATE ROLE library_app_user WITH LOGIN PASSWORD 'library_app_pass_123' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION;
+   END IF;
+END
+$do$;
+
+\c library_db
+
+GRANT CONNECT ON DATABASE library_db TO library_app_user;
+GRANT USAGE ON SCHEMA public TO library_app_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO library_app_user;
+GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO library_app_user;
+
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO library_app_user;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO library_app_user;
