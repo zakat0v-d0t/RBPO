@@ -1,0 +1,322 @@
+### ====================================================================
+### ЛАБОРАТОРНАЯ РАБОТА №4: SPRING SECURITY REST API COLLECTION
+### HTTP Basic Auth + CSRF Protection + RBAC & Context ABAC
+### ====================================================================
+
+@baseUrl = http://localhost:8080/api
+
+### --------------------------------------------------------------------
+### 1. ПУБЛИЧНЫЙ ДОСТУП И ПОЛУЧЕНИЕ CSRF ТОКЕНА
+### --------------------------------------------------------------------
+
+### 1.1. Публичный просмотр каталога книг (без авторизации)
+GET {{baseUrl}}/book-editions
+Accept: application/json
+
+### 1.2. Публичный просмотр свободных экземпляров книг
+GET {{baseUrl}}/copies/available
+Accept: application/json
+
+### 1.3. Запрос CSRF-токена (токен также сохраняется в cookie XSRF-TOKEN)
+# @name getCsrf
+GET {{baseUrl}}/auth/csrf
+Accept: application/json
+
+### Сохраняем токен в переменную для последующих запросов
+@csrfToken = {{getCsrf.response.body.token}}
+
+
+### --------------------------------------------------------------------
+### 2. РЕГИСТРАЦИЯ ПОЛЬЗОВАТЕЛЕЙ (PUBLIC + CSRF)
+### --------------------------------------------------------------------
+
+### 2.1. Неуспешная регистрация: слишком простой пароль (Ожидается 400 Bad Request)
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+X-XSRF-TOKEN: {{csrfToken}}
+
+{
+  "username": "simple_user",
+  "password": "123",
+  "name": "Простой Пароль",
+  "email": "simple@example.com",
+  "phone": "+79990001122"
+}
+
+### 2.2. Неуспешная регистрация: отсутствует CSRF-токен (Ожидается 403 Forbidden)
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "username": "no_csrf_user",
+  "password": "Password123!",
+  "name": "Без CSRF",
+  "email": "nocsrf@example.com"
+}
+
+### 2.3. Успешная регистрация нового читателя со стойким паролем (201 Created)
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+X-XSRF-TOKEN: {{csrfToken}}
+
+{
+  "username": "dmitry",
+  "password": "Password123!",
+  "name": "Дмитрий Кузнецов",
+  "email": "dmitry@example.com",
+  "phone": "+79995554433"
+}
+
+### 2.4. Неуспешная повторная регистрация с тем же логином (Ожидается 400 Bad Request)
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+X-XSRF-TOKEN: {{csrfToken}}
+
+{
+  "username": "dmitry",
+  "password": "Password123!",
+  "name": "Дмитрий Дубль",
+  "email": "dmitry_dup@example.com"
+}
+
+
+### --------------------------------------------------------------------
+### 3. АУТЕНТИФИКАЦИЯ И СОСТОЯНИЕ УЧЕТНОЙ ЗАПИСИ
+### --------------------------------------------------------------------
+
+### 3.1. Неверный пароль читателя (Ожидается 401 Unauthorized)
+GET {{baseUrl}}/auth/me
+Authorization: Basic ivan WrongPassword!
+Accept: application/json
+
+### 3.2. Вход заблокированного читателя (Ожидается 401 Unauthorized - Account Locked)
+GET {{baseUrl}}/auth/me
+Authorization: Basic blocked_user User123!
+Accept: application/json
+
+### 3.3. Успешная аутентификация активного читателя Ивана (200 OK)
+GET {{baseUrl}}/auth/me
+Authorization: Basic ivan User123!
+Accept: application/json
+
+### 3.4. Успешная аутентификация администратора библиотеки (200 OK)
+GET {{baseUrl}}/auth/me
+Authorization: Basic admin Admin123!
+Accept: application/json
+
+
+### --------------------------------------------------------------------
+### 4. РОЛЕВАЯ АВТОРИЗАЦИЯ (RBAC: ROLE_ADMIN vs ROLE_READER)
+### --------------------------------------------------------------------
+
+### 4.1. Читатель пытается запросить список ВСЕХ пользователей (Ожидается 403 Forbidden)
+GET {{baseUrl}}/users
+Authorization: Basic ivan User123!
+Accept: application/json
+
+### 4.2. Администратор запрашивает список ВСЕХ пользователей (200 OK)
+GET {{baseUrl}}/users
+Authorization: Basic admin Admin123!
+Accept: application/json
+
+### 4.3. Читатель пытается добавить книгу в каталог (Ожидается 403 Forbidden)
+POST {{baseUrl}}/book-editions
+Authorization: Basic ivan User123!
+Content-Type: application/json
+X-XSRF-TOKEN: {{csrfToken}}
+
+{
+  "title": "Хакерство и взлом",
+  "author": "Неизвестный",
+  "isbn": "999-0-00-000001-1"
+}
+
+### 4.4. Администратор успешно добавляет книгу в каталог (201 Created)
+POST {{baseUrl}}/book-editions
+Authorization: Basic admin Admin123!
+Content-Type: application/json
+X-XSRF-TOKEN: {{csrfToken}}
+
+{
+  "title": "Паттерны проектирования",
+  "author": "Эрих Гамма",
+  "isbn": "978-5-4461-0001-9"
+}
+
+### 4.5. Администратор добавляет новый физический экземпляр книги (201 Created)
+POST {{baseUrl}}/copies
+Authorization: Basic admin Admin123!
+Content-Type: application/json
+X-XSRF-TOKEN: {{csrfToken}}
+
+{
+  "bookEditionId": 1,
+  "inventoryNumber": "INV-NEW-999",
+  "condition": "NEW"
+}
+
+
+### --------------------------------------------------------------------
+### 5. КОНТЕКСТНАЯ АВТОРИЗАЦИЯ (ABAC / OWNERSHIP)
+### --------------------------------------------------------------------
+
+### 5.1. Читатель Иван запрашивает СВОЙ профиль (id: 1) (200 OK)
+GET {{baseUrl}}/users/1
+Authorization: Basic ivan User123!
+Accept: application/json
+
+### 5.2. Читатель Иван пытается просмотреть ЧУЖОЙ профиль Анны (id: 2) (Ожидается 403 Forbidden)
+GET {{baseUrl}}/users/2
+Authorization: Basic ivan User123!
+Accept: application/json
+
+### 5.3. Администратор просматривает чужой профиль Анны (id: 2) (200 OK)
+GET {{baseUrl}}/users/2
+Authorization: Basic admin Admin123!
+Accept: application/json
+
+### 5.4. Читатель Иван обновляет СВОЙ контактный телефон (200 OK)
+PATCH {{baseUrl}}/users/1
+Authorization: Basic ivan User123!
+Content-Type: application/json
+X-XSRF-TOKEN: {{csrfToken}}
+
+{
+  "phone": "+79998889900"
+}
+
+### 5.5. Читатель Иван пытается изменить данные в чужом профиле (id: 2) (Ожидается 403 Forbidden)
+PATCH {{baseUrl}}/users/2
+Authorization: Basic ivan User123!
+Content-Type: application/json
+X-XSRF-TOKEN: {{csrfToken}}
+
+{
+  "name": "Нелегитимное имя"
+}
+
+### 5.6. Читатель запрашивает список выдач (возвращаются ТОЛЬКО его выдачи)
+GET {{baseUrl}}/loans
+Authorization: Basic ivan User123!
+Accept: application/json
+
+### 5.7. Администратор запрашивает список всех выдач по библиотеке (200 OK)
+GET {{baseUrl}}/loans
+Authorization: Basic admin Admin123!
+Accept: application/json
+
+### 5.8. Читатель Иван пытается записать в очередь чужого пользователя (userId: 2) (Ожидается 403 Forbidden)
+POST {{baseUrl}}/waiting-requests/subscribe
+Authorization: Basic ivan User123!
+Content-Type: application/json
+X-XSRF-TOKEN: {{csrfToken}}
+
+{
+  "bookEditionId": 1,
+  "userId": 2
+}
+
+### 5.9. Читатель Иван встает в лист ожидания под своим userId (201 Created)
+POST {{baseUrl}}/waiting-requests/subscribe
+Authorization: Basic ivan User123!
+Content-Type: application/json
+X-XSRF-TOKEN: {{csrfToken}}
+
+{
+  "bookEditionId": 3,
+  "userId": 1
+}
+
+
+### --------------------------------------------------------------------
+### 6. БИЗНЕС-ОПЕРАЦИИ С ПРОВЕРКАМИ БЕЗОПАСНОСТИ
+### --------------------------------------------------------------------
+
+### 6.1. Читатель пытается самостоятельно выдать себе книгу (Ожидается 403 Forbidden - только ADMIN)
+POST {{baseUrl}}/loans/issue
+Authorization: Basic ivan User123!
+Content-Type: application/json
+X-XSRF-TOKEN: {{csrfToken}}
+
+{
+  "copyId": 1,
+  "userId": 1
+}
+
+### 6.2. Администратор пытается выдать книгу ЗАБЛОКИРОВАННОМУ читателю (Ожидается 400 Bad Request)
+POST {{baseUrl}}/loans/issue
+Authorization: Basic admin Admin123!
+Content-Type: application/json
+X-XSRF-TOKEN: {{csrfToken}}
+
+{
+  "copyId": 1,
+  "userId": 3
+}
+
+### 6.3. Администратор выдает свободный экземпляр читателю Ивану (201 Created)
+POST {{baseUrl}}/loans/issue
+Authorization: Basic admin Admin123!
+Content-Type: application/json
+X-XSRF-TOKEN: {{csrfToken}}
+
+{
+  "copyId": 4,
+  "userId": 1
+}
+
+### 6.4. Администратор пытается повторно выдать уже выданный экземпляр 4 (Ожидается 400 Bad Request)
+POST {{baseUrl}}/loans/issue
+Authorization: Basic admin Admin123!
+Content-Type: application/json
+X-XSRF-TOKEN: {{csrfToken}}
+
+{
+  "copyId": 4,
+  "userId": 2
+}
+
+### 6.5. Читатель пытается оформить возврат книги (Ожидается 403 Forbidden - только ADMIN)
+POST {{baseUrl}}/loans/1/return
+Authorization: Basic ivan User123!
+X-XSRF-TOKEN: {{csrfToken}}
+
+### 6.6. Администратор оформляет возврат книги (200 OK + закрытие заявки ожидания при наличии)
+POST {{baseUrl}}/loans/2/return
+Authorization: Basic admin Admin123!
+X-XSRF-TOKEN: {{csrfToken}}
+
+
+### --------------------------------------------------------------------
+### 7. УПРАВЛЕНИЕ СТАТУСОМ ПОЛЬЗОВАТЕЛЕЙ (БЛОКИРОВКА / РАЗБЛОКИРОВКА)
+### --------------------------------------------------------------------
+
+### 7.1. Администратор блокирует учетную запись читателя (id: 1) (200 OK)
+PATCH {{baseUrl}}/users/1/status
+Authorization: Basic admin Admin123!
+Content-Type: application/json
+X-XSRF-TOKEN: {{csrfToken}}
+
+{
+  "status": "BLOCKED"
+}
+
+### 7.2. Заблокированный читатель Иван пытается обратиться к API (Ожидается 401 Unauthorized)
+GET {{baseUrl}}/auth/me
+Authorization: Basic ivan User123!
+Accept: application/json
+
+### 7.3. Администратор разблокирует читателя Ивана (200 OK)
+PATCH {{baseUrl}}/users/1/status
+Authorization: Basic admin Admin123!
+Content-Type: application/json
+X-XSRF-TOKEN: {{csrfToken}}
+
+{
+  "status": "ACTIVE"
+}
+
+### 7.4. Читатель Иван снова успешно авторизуется в системе (200 OK)
+GET {{baseUrl}}/auth/me
+Authorization: Basic ivan User123!
+Accept: application/json
